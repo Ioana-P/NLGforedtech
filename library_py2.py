@@ -299,7 +299,19 @@ def get_total_vocab(data, columns=['context_lemma_pos', 'question_lemma_pos']):
                 vocab.append(k)
 
     set_vocab = set(vocab)
-    return set_vocab
+    vocab_dict = dict(zip(set_vocab, range(len(set_vocab))))
+    
+    return vocab_dict
+
+def file_to_word_ids(vocabulary, data, columns):
+    txt = []
+    for col in columns:
+        for i in data[col]:
+            j = i.split(' ')
+            for k in j:
+                txt.append(k)
+    word2id_dict = vocabulary
+    return [word2id_dict[word] for word in vocabulary if word in txt]
 
 
 def get_glove_vectors(filepath, data, columns, vocab):

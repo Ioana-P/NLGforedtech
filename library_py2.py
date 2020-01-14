@@ -305,13 +305,14 @@ def get_total_vocab(data, columns=['context_lemma_pos', 'question_lemma_pos']):
 
 def file_to_word_ids(vocabulary, data, columns):
     txt = []
+    word2id_dict = vocabulary
     for col in columns:
         for i in data[col]:
             j = i.split(' ')
             for k in j:
-                txt.append(k)
-    word2id_dict = vocabulary
-    return [word2id_dict[word] for word in vocabulary if word in txt]
+                txt.append(word2id_dict[k])
+    
+    return txt
 
 
 def get_glove_vectors(filepath, data, columns, vocab):

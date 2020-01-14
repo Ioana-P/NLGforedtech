@@ -106,14 +106,17 @@ def preprocessing(df, columns_list=['context', 'question'],
     new_df.reset_index(drop=True, inplace=True)
     
     for col in columns_list:
+        
         new_df[col].astype('str')
+        new_df[col] = new_df[col].apply(lambda x: x.replace('\n', ' '))
+
         new_df['{col}_{suffix}'.format(col=col, suffix=suffix)] = 0
         for i in range(len(new_df[col])):
             if len(new_df[col][i])>0:
                 final_words=[]
                 sentences = nltk.sent_tokenize(new_df[col][i])
                 for sentence in sentences: 
-                    
+        
                     input_words = sentence.translate(str.maketrans('','', string_mod_punctuation)).split(' ')
                     if rm_stopwords:
                         words = [word for word in input_words if not word in stop_words]
@@ -168,7 +171,12 @@ def extract(lst_tup):
     for i in lst_tup:
         output+=i[0]+' '
     return output
+
+
+def prep_for_lstm(data, columns=['context', 'question', 'answers'],
+                 ):
     
+    pass
 #### CORPUS STATISTICS RELATED FUNCTIONS
     
     
@@ -287,31 +295,74 @@ def get_tf_idf_col(data, columns=['context_lemma_pos', 'question_lemma_pos']):
 
 #### WORD EMBEDDINGS RELATED FUNCTIONS
 
-def get_total_vocab(data, columns=['context_lemma_pos', 'question_lemma_pos']):
+def get_total_vocab(data, column='text'):
     """Gets a list of all the tokens from the token-pos tuples in our columns 
     and adds them all to a single list"""
     vocab=[]
-    for col in columns:
-        for i in data[col]:
-            j = i.split(' ')
-     
-            for k in j:
-                vocab.append(k)
-
+    
+    for i in data[column]:
+        j = i.split()
+        for k in j:
+            vocab.append(k)
+    vocab.append('')
     set_vocab = set(vocab)
     vocab_dict = dict(zip(set_vocab, range(len(set_vocab))))
     
     return vocab_dict
 
-def file_to_word_ids(vocabulary, data, columns):
+def file_to_word_ids(vocabulary, data, input_col, output_col, 
+                     max_input, max_output, pad = ''):
     txt = []
     word2id_dict = vocabulary
-    for col in columns:
-        for i in data[col]:
-            j = i.split(' ')
-            for k in j:
-                txt.append(word2id_dict[k])
     
+    data=data.reset_index(drop=True)
+    
+    discounted=0
+    for i in data.index:
+        try:    
+            j = data.iloc[i][input_col]
+            try:
+                j = j.split(' ')
+            except AttributeError:
+                j = j
+        except IndexError:
+            print("Element not found at index ", i)
+            j = data[input_col][i]
+            try:
+                j = j.split(' ')
+            except AttributeError:
+                j = j
+                
+        try:
+            k = data.iloc[i][output_col]
+            try:
+                k = k.split(' ')
+            except AttributeError:
+                k = k
+        except IndexError:
+            print("Element not found at index ", i)
+            k = data[output_col][i]
+            try:
+                k = k.split(' ')
+            except AttributeError:
+                k = k
+            
+        while len(j)<max_input:
+            j.append(pad)
+        while len(k)<max_output:
+            k.append(pad)
+        
+        for w in j:
+            try:
+                txt.append(word2id_dict[w])
+            except KeyError:
+                continue
+        for a in k:
+            try:
+                txt.append(word2id_dict[a])
+            except KeyError:
+                continue
+    print(discounted)
     return txt
 
 

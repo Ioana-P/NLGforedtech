@@ -21,6 +21,7 @@ from nltk import word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.feature_extraction.text import CountVectorizer
+from keras.preprocessing.sequence import pad_sequences
 import re
 import os
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -306,19 +307,19 @@ def get_total_vocab(data, column='text'):
             vocab.append(k)
     vocab.append('')
     set_vocab = set(vocab)
-    vocab_dict = dict(zip(set_vocab, range(len(set_vocab))))
-    
+    vocab_dict = dict(zip(set_vocab, range(1,len(set_vocab)+1)))
+    vocab_dict.update({'---':0})
     return vocab_dict
 
 def file_to_word_ids(vocabulary, data, input_col, output_col, 
-                     max_input, max_output, pad = ''):
-    txt = []
+                     max_input, max_output):
     word2id_dict = vocabulary
-    
+    txt_lst=[]
     data=data.reset_index(drop=True)
-    
-    discounted=0
+
     for i in data.index:
+        txt = []
+
         try:    
             j = data.iloc[i][input_col]
             try:
@@ -332,7 +333,7 @@ def file_to_word_ids(vocabulary, data, input_col, output_col,
                 j = j.split(' ')
             except AttributeError:
                 j = j
-                
+
         try:
             k = data.iloc[i][output_col]
             try:
@@ -346,24 +347,31 @@ def file_to_word_ids(vocabulary, data, input_col, output_col,
                 k = k.split(' ')
             except AttributeError:
                 k = k
-            
-        while len(j)<max_input:
-            j.append(pad)
-        while len(k)<max_output:
-            k.append(pad)
-        
+
+    #         j = pad_sequences(j, maxlen=max_input, padding='pre')
+    #         k = pad_sequences(k, maxlen=max_output, padding='pre')
+
+
+#             while len(j)<max_input:
+#                 j.insert(0, pad)
+#             while len(k)<max_output:
+#                 k.insert(0, pad)
+
         for w in j:
             try:
                 txt.append(word2id_dict[w])
             except KeyError:
                 continue
-        for a in k:
+        for a in k[:-1]:
             try:
                 txt.append(word2id_dict[a])
             except KeyError:
                 continue
-    print(discounted)
-    return txt
+                
+        txt_lst.append(txt)
+
+    txt_lst_final = pad_sequences(txt_lst, maxlen=(max_input+max_output), padding='pre')
+    return txt_lst_final
 
 
 def get_glove_vectors(filepath, data, columns, vocab):

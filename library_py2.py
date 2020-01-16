@@ -362,10 +362,13 @@ def file_to_word_ids(vocabulary, data, input_col, output_col,
                 txt.append(word2id_dict[w])
             except KeyError:
                 continue
-        for a in k[:-1]:
-            try:
-                txt.append(word2id_dict[a])
-            except KeyError:
+        for a in k:
+            if a!='':
+                try:
+                    txt.append(word2id_dict[a])
+                except KeyError:
+                    continue
+            else:
                 continue
                 
         txt_lst.append(txt)

@@ -410,3 +410,76 @@ class W2vVectorizer(object):
             return np.array([
                    np.mean([self.w2v[w] for w in words if w in self.w2v]
                            or [np.zeros(self.dimensions)], axis=0) for words in X])
+        
+        
+
+
+        
+        
+def load_data(data, use_glove=True, embedding_dim=50, 
+              train_split = 0.8,
+              valid_split = 0.1,
+              shuffle_df = True,
+              input_col_name='text', output_col_name='answers_lstm',
+              brief_printout=True):
+    
+    data.reset_index(inplace=True, drop=True)
+    
+    if shuffle_df:
+        data = data.sample(frac=1).reset_index(drop=True)
+    
+    train_df = data.iloc[:round(train_split*len(data))]
+    valid_df = data.iloc[round(train_split*len(data)):round((1-valid_split)*len(data))]
+    test_df = data.iloc[round((train_split+valid_split)*len(data)):]
+    
+    input_max_len = data[input_col_name].apply(lambda x: len(x.split(' '))).max()
+    output_max_len = data[output_col_name].apply(lambda x: len(x.split(' '))).max()
+
+    # build the complete vocabulary, then convert text data to dict of integer-word pairs
+    vocabulary = get_total_vocab(data, column=input_col_name)
+    train_data = file_to_word_ids(vocabulary, train_df, input_col=input_col_name, output_col = output_col_name, 
+                                      max_input=input_max_len, max_output=output_max_len)
+    valid_data = file_to_word_ids(vocabulary, valid_df, input_col=input_col_name, output_col = output_col_name, 
+                                      max_input=input_max_len, max_output=output_max_len)
+    test_data = file_to_word_ids(vocabulary, test_df, input_col=input_col_name, output_col = output_col_name, 
+                                      max_input=input_max_len, max_output=output_max_len)
+    vocabulary_size = len(vocabulary)
+    reversed_dictionary = dict(zip(vocabulary.values(), vocabulary.keys()))
+    
+    if use_glove:
+        
+        dim=embedding_dim
+        if dim not in [50, 100, 200, 300]:
+            raise 
+        embeddings_index = {}
+        f = open(os.path.join('glove.6B/glove.6B.{}d.txt'.format(dim)))
+        coefs_sum=np.zeros((dim,))
+        coefs_count = 0
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype='float32')
+            embeddings_index[word] = coefs
+            coefs_sum += coefs
+            coefs_count+=1
+        f.close()
+        coefs_mean = coefs_sum/coefs_count
+        
+        embedding_matrix = np.zeros((len(vocabulary), dim))
+        for word, i in vocabulary.items():
+            embedding_vector = embeddings_index.get(word)
+            if embedding_vector is not None:
+                embedding_matrix[i] = embedding_vector
+            else:
+                embedding_matrix[i] = coefs_mean
+                
+    if brief_printout:
+        print("First five train ... ", train_data[:5])
+        print("Vocabulary   ", vocabulary)
+        print(" Size of vocab .  ", vocabulary_size)
+        train_data_lst=train_data.tolist()
+        print(" ".join([reversed_dictionary[x] for x in train_data_lst[10]]))
+    
+    
+    return train_data, valid_data, test_data, vocabulary, reversed_dictionary, vocabulary_size, embedding_matrix
+

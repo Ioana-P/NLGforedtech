@@ -18,13 +18,25 @@ from gensim.models import Word2Vec
 from nltk.collocations import *
 from nltk import FreqDist
 from nltk import word_tokenize
+import re
+import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.feature_extraction.text import CountVectorizer
 from keras.preprocessing.sequence import pad_sequences
-import re
-import os
-from sklearn.feature_extraction.text import TfidfVectorizer
+from keras.layers import Input, Dense, LSTM, Embedding, Masking
+from keras.layers import Dropout, Activation, Bidirectional, GlobalMaxPool1D
+from keras.models import Model
+from keras import initializers, regularizers, constraints, optimizers, layers
+from keras.preprocessing import text, sequence
+from keras.utils import to_categorical
+from keras.callbacks import ModelCheckpoint
+import argparse
+import tensorflow as tf
+from keras.models import Sequential, load_model
+from keras.layers import Dense, Activation, Embedding, Dropout, TimeDistributed
+from keras.optimizers import Adam
+from keras.preprocessing.sequence import pad_sequences
 
 #### CLEANING FUNCTIONS
 
@@ -422,6 +434,33 @@ def load_data(data, use_glove=True, embedding_dim=50,
               shuffle_df = True,
               input_col_name='text', output_col_name='answers_lstm',
               brief_printout=True):
+    """ Takes in dataframe of untokenized text, expecting one input and one
+    output column and transforms it into 3 arrays for training, validation 
+    and testing data, each of dimensions:
+    (word, max_sentence_length, vocabulary_size)
+    ----------------------------------------------------------
+    data - Pandas dataframe
+    use_glove - bool, whether to use the pretrained Glove word embeddings
+    downloaded from https://nlp.stanford.edu/projects/glove/
+    embedding_dim - int, what is the dimension of the pretrained weights
+    train_split - float<1, fraction of data to use as train
+    valid_split - float<1, fraction of data to use for validation; test
+    split is 1 - other splits summed.
+    shuffle_df - whether to reorder the dataframe index
+    input_col_name - str, name of dataframe column to retrieve 
+    input text from
+    output_col_name - str, name of dataframe column to retrieve 
+    output text from
+    brief_printout - bool, whether to provide a brief printout of the 
+    results or not. 
+    ----------------------------------------------------------
+    RETURNS:
+    train_data, valid_data, test_data, - np.arrays
+    vocabulary, reversed_dictionary, - dict
+    vocabulary_size, int
+    embedding_matrix, np.array
+    embedding_dim, tuple(int)
+    """
     
     data.reset_index(inplace=True, drop=True)
     
@@ -450,7 +489,7 @@ def load_data(data, use_glove=True, embedding_dim=50,
         
         dim=embedding_dim
         if dim not in [50, 100, 200, 300]:
-            raise 
+            raise Exception('Specified embedding dimension ({}) not available. Current GloVe embeddings \n are [50, 100, 200, 300].'.format(dim))
         embeddings_index = {}
         f = open(os.path.join('glove.6B/glove.6B.{}d.txt'.format(dim)))
         coefs_sum=np.zeros((dim,))
@@ -474,12 +513,93 @@ def load_data(data, use_glove=True, embedding_dim=50,
                 embedding_matrix[i] = coefs_mean
                 
     if brief_printout:
-        print("First five train ... ", train_data[:5])
-        print("Vocabulary   ", vocabulary)
-        print(" Size of vocab .  ", vocabulary_size)
+        print("First five train sentences in vectorized format : ", train_data[:5])
+        print("Vocabulary examples :   ", "cosmological - ", vocabulary['cosmological'], 
+              "conservatoire - ", vocabulary['conservatoire'], 
+              "bring - ", vocabulary['bring'])
+        print(" Size of vocabulary : ", vocabulary_size)
         train_data_lst=train_data.tolist()
-        print(" ".join([reversed_dictionary[x] for x in train_data_lst[10]]))
+        print(" ".join([reversed_dictionary[x] for x in train_data_lst[10] if x!=0]))
+        print("")
     
     
-    return train_data, valid_data, test_data, vocabulary, reversed_dictionary, vocabulary_size, embedding_matrix
+    return train_data, valid_data, test_data, vocabulary, reversed_dictionary, vocabulary_size, embedding_matrix, embedding_dim
 
+
+
+class KerasBatchGenerator(object):
+    """Object that takes in numpy array data, number of 'steps' to take 
+    along sequence of data for each iteration; batch-size, 
+    ----------------------------------------------------------
+    data - np.arrays
+    num_steps - int, how long one input sequence should be
+    vocabulary - dict, k:v word : unique integer pairs
+    skip_step - int, optional - how many sequence elements to skip
+    after each iteration
+    answer_length - how long the output sequence is; batch generator 
+    will take from the end of input sequence
+    ----------------------------------------------------------
+    YIELDS:
+    x, y - tuple of equal sized np.arrays, to be fed into a Keras
+    model
+    """
+    def __init__(self, data, num_steps, batch_size, vocabulary, skip_step = 0, answer_length=1):
+        """Object that takes in numpy array data, number of 'steps' to take 
+        along sequence of data for each iteration; batch-size, 
+        ----------------------------------------------------------
+        data - np.arrays
+        num_steps - int, how long one input sequence should be
+        vocabulary - dict, k:v word : unique integer pairs
+        skip_step - int, optional - how many sequence elements to skip
+        after each iteration
+        answer_length - how long the output sequence is; batch generator 
+        will take from the end of input sequence
+        ----------------------------------------------------------
+        YIELDS:
+        x, y - tuple of equal sized np.arrays, to be fed into a Keras
+        model
+        """
+        self.data = data
+        self.num_steps = num_steps
+        self.batch_size = batch_size
+        self.vocabulary = vocabulary
+        self.current_idx = 0
+        self.skip_step = skip_step
+        self.vocabulary_size = len(vocabulary)
+        self.answer_length = answer_length
+        
+        
+    #     
+    #     skip_steps = how far to move the window after the prediction is made
+
+    def generate(self):
+        """Object that takes in numpy array data, number of 'steps' to take 
+        along sequence of data for each iteration; batch-size, 
+        ----------------------------------------------------------
+        data - np.arrays
+        num_steps - int, how long one input sequence should be
+        vocabulary - dict, k:v word : unique integer pairs
+        skip_step - int, optional - how many sequence elements to skip
+        after each iteration
+        answer_length - how long the output sequence is; batch generator 
+        will take from the end of input sequence
+        ----------------------------------------------------------
+        YIELDS:
+        x, y - tuple of equal sized np.arrays, to be fed into a Keras
+        model
+        """
+        x = np.zeros((self.batch_size, self.num_steps)) # input nn nodes, same dimensions as batchsize x nr of words in 1 window
+        y = np.zeros((self.batch_size, self.num_steps, self.vocabulary_size)) # output nodes
+        while True:
+            for i in range(self.batch_size):
+                if self.current_idx + self.num_steps >= len(self.data): # once the ticker goes over the length of data, reset it
+                    self.current_idx = 0
+                x[i,:] = self.data[self.current_idx][:-self.answer_length]
+                temp_y = self.data[self.current_idx][self.answer_length:]
+                # converts all the output y into a 1-hot representation
+                y[i,:, :] = to_categorical(temp_y, num_classes=self.vocabulary_size)
+                self.current_idx+=1
+            
+            
+            yield x, y
+            

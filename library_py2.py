@@ -308,15 +308,15 @@ def get_tf_idf_col(data, columns=['context_lemma_pos', 'question_lemma_pos']):
 
 #### WORD EMBEDDINGS RELATED FUNCTIONS
 
-def get_total_vocab(data, column='text'):
+def get_total_vocab(data, columns=['text']):
     """Gets a list of all the tokens from the token-pos tuples in our columns 
     and adds them all to a single list"""
     vocab=[]
-    
-    for i in data[column]:
-        j = i.split()
-        for k in j:
-            vocab.append(k)
+    for column in columns:
+        for i in data[column]:
+            j = i.split()
+            for k in j:
+                vocab.append(k)
     vocab.append('')
     set_vocab = set(vocab)
     vocab_dict = dict(zip(set_vocab, range(1,len(set_vocab)+1)))
@@ -324,68 +324,84 @@ def get_total_vocab(data, column='text'):
     return vocab_dict
 
 def file_to_word_ids(vocabulary, data, input_col, output_col, 
-                     max_input, max_output):
+                     max_input, max_output=0):
     word2id_dict = vocabulary
     txt_lst=[]
     data=data.reset_index(drop=True)
-
-    for i in data.index:
-        txt = []
-
-        try:    
-            j = data.iloc[i][input_col]
+    
+    if output_col==None:
+        max_length=max_input
+        data[input_col].drop_duplicates(inplace=True)
+        
+        for i in data[input_col]:
             try:
-                j = j.split(' ')
+                j = i.split(' ')
             except AttributeError:
-                j = j
-        except IndexError:
-            print("Element not found at index ", i)
-            j = data[input_col][i]
-            try:
-                j = j.split(' ')
-            except AttributeError:
-                j = j
-
-        try:
-            k = data.iloc[i][output_col]
-            try:
-                k = k.split(' ')
-            except AttributeError:
-                k = k
-        except IndexError:
-            print("Element not found at index ", i)
-            k = data[output_col][i]
-            try:
-                k = k.split(' ')
-            except AttributeError:
-                k = k
-
-    #         j = pad_sequences(j, maxlen=max_input, padding='pre')
-    #         k = pad_sequences(k, maxlen=max_output, padding='pre')
-
-
-#             while len(j)<max_input:
-#                 j.insert(0, pad)
-#             while len(k)<max_output:
-#                 k.insert(0, pad)
-
-        for w in j:
-            try:
-                txt.append(word2id_dict[w])
-            except KeyError:
-                continue
-        for a in k:
-            if a!='':
-                try:
-                    txt.append(word2id_dict[a])
-                except KeyError:
+                j = i
+            for w in j:
+                if (w!='' and w!=' '):
+                    try:
+                        txt_lst.append(word2id_dict[w])
+                    except KeyError:
+                        raise KeyError('cannot find {}'.format(w))
+                else:
                     continue
-            else:
-                continue
-                
-        txt_lst.append(txt)
+            
+        txt_lst_final = [x for x in txt_lst if x!=2]        
+            
+    else:
+        max_length = (max_input+max_output)
+        for i in data.index:
+            txt = []
 
-    txt_lst_final = pad_sequences(txt_lst, maxlen=(max_input+max_output), padding='pre')
+            try:    
+                j = data.iloc[i][input_col]
+                try:
+                    j = j.split(' ')
+                except AttributeError:
+                    j = j
+            except IndexError:
+                print("Element not found at index ", i)
+                j = data[input_col][i]
+                try:
+                    j = j.split(' ')
+                except AttributeError:
+                    j = j
+
+            try:
+                k = data.iloc[i][output_col]
+                try:
+                    k = k.split(' ')
+                except AttributeError:
+                    k = k
+            except IndexError:
+                print("Element not found at index ", i)
+                k = data[output_col][i]
+                try:
+                    k = k.split(' ')
+                except AttributeError:
+                    k = k
+
+            for w in j:
+                if (w!='' and w!=' ' and w!=2):
+                    try:
+                        txt.append(word2id_dict[w])
+                    except KeyError:
+                        continue
+                else:
+                    continue
+            for a in k:
+                if (a!='' and a!=' ' and a!=2):
+                    try:
+                        txt.append(word2id_dict[a])
+                    except KeyError:
+                        continue
+                else:
+                    continue
+            txt = [x for x in txt if x!=2]        
+            txt_lst.append(txt)
+
+        txt_lst_final = pad_sequences(txt_lst, maxlen=max_length, padding='pre')
     return txt_lst_final
 
 
@@ -401,34 +417,46 @@ def get_glove_vectors(filepath, data, columns, vocab):
                 glove_dict[word] = vector
     return glove_dict
 
-class W2vVectorizer(object):
-    
-    def __init__(self, w2v, mean_wv=True):
-        # takes in a dictionary of words and vectors as input
-        self.w2v = w2v
-        if len(w2v) == 0:
-            self.dimensions = 0
-        else:
-            self.dimensions = len(w2v[next(iter(glove))])
-        self.mean_wv=mean_wv
-    
-    # Note from Mike: Even though it doesn't do anything, it's required that this object implement a fit method or else
-    # It can't be used in a sklearn Pipeline. 
-    def fit(self, X, y):
-        return self
-            
-    def transform(self, X):
-        if mean_wv:
-            return np.array([
-                   np.mean([self.w2v[w] for w in words if w in self.w2v]
-                           or [np.zeros(self.dimensions)], axis=0) for words in X])
-        
-        
+def split_word_pos(word, sep='_'):
+    w = ''
+    p = ''
+    try:
+        for l in word[:word.index(sep)]:
+            w+=l
+        for t in word[word.index(sep)+1:]:
+            p+=t
+    except:
+        w=word
+        p=''
+    return w, p
 
+def get_pos_dict(df_w_pos, columns=['context_lemma_pos',	'question_lemma_pos',	'answers_lemma_pos'	]):
+    pos_dict={}
+    weight_list=[]
+    df = df_w_pos.copy()
+    pos_dict.update({'':0.0})
+    for col in columns:
+        for row in df[col]:
+            for tup in row:
+                new_pos = tup[1]
+                if new_pos not in pos_dict.values():
+                    new_weight = np.random.random()
+                    while new_weight in weight_list:
+                        new_weight = np.random.random()
+                    pos_dict.update({new_pos: new_weight})
+                    
+    return pos_dict
 
+def vectorize_pos(pos, pos_dict):
+    pos_val = pos_dict[pos]
+    return np.asarray(pos_val)
+    
+    
         
-        
-def load_data(data, use_glove=True, embedding_dim=50, 
+def load_data(data, pos_dict,
+              use_glove=True, 
+              embedding_dim=50,
+              use_pos=False,
               train_split = 0.8,
               valid_split = 0.1,
               shuffle_df = True,
@@ -453,6 +481,7 @@ def load_data(data, use_glove=True, embedding_dim=50,
     output text from
     brief_printout - bool, whether to provide a brief printout of the 
     results or not. 
+    pos_dict - dict, k:v pairs of POS tags (e.g. JJ, $, VBP) and a stored random float
     ----------------------------------------------------------
     RETURNS:
     train_data, valid_data, test_data, - np.arrays
@@ -475,7 +504,7 @@ def load_data(data, use_glove=True, embedding_dim=50,
     output_max_len = data[output_col_name].apply(lambda x: len(x.split(' '))).max()
 
     # build the complete vocabulary, then convert text data to dict of integer-word pairs
-    vocabulary = get_total_vocab(data, column=input_col_name)
+    vocabulary = get_total_vocab(data, columns=input_col_name)
     train_data = file_to_word_ids(vocabulary, train_df, input_col=input_col_name, output_col = output_col_name, 
                                       max_input=input_max_len, max_output=output_max_len)
     valid_data = file_to_word_ids(vocabulary, valid_df, input_col=input_col_name, output_col = output_col_name, 
@@ -486,7 +515,11 @@ def load_data(data, use_glove=True, embedding_dim=50,
     reversed_dictionary = dict(zip(vocabulary.values(), vocabulary.keys()))
     
     if use_glove:
-        
+        if use_pos:
+            pos_dim = 1
+           
+        else:
+            pos_dim = 0
         dim=embedding_dim
         if dim not in [50, 100, 200, 300]:
             raise Exception('Specified embedding dimension ({}) not available. Current GloVe embeddings \n are [50, 100, 200, 300].'.format(dim))
@@ -494,6 +527,7 @@ def load_data(data, use_glove=True, embedding_dim=50,
         f = open(os.path.join('glove.6B/glove.6B.{}d.txt'.format(dim)))
         coefs_sum=np.zeros((dim,))
         coefs_count = 0
+        # here we extract and build a dict containing all the words from the GloVe file and stor them under embeddings_index
         for line in f:
             values = line.split()
             word = values[0]
@@ -504,26 +538,175 @@ def load_data(data, use_glove=True, embedding_dim=50,
         f.close()
         coefs_mean = coefs_sum/coefs_count
         
-        embedding_matrix = np.zeros((len(vocabulary), dim))
+        # the emb_matrix will be where we actually store our vectors; if using pos
+        # then we split the matrix: for each of the unique word&pos combinations
+        # we take let the first "dim" nr elements be taken up the embedding vector
+        # 
+        embedding_matrix = np.zeros((len(vocabulary), dim+pos_dim))
         for word, i in vocabulary.items():
+            if use_pos:
+                word, pos = split_word_pos(word)
+                unique_pos_vector = vectorize_pos(pos, pos_dict)
             embedding_vector = embeddings_index.get(word)
             if embedding_vector is not None:
-                embedding_matrix[i] = embedding_vector
+                embedding_matrix[i,:dim] = embedding_vector
+                if use_pos:    
+                    embedding_matrix[i,dim:]=unique_pos_vector
             else:
-                embedding_matrix[i] = coefs_mean
-                
+                embedding_matrix[i,:dim] = coefs_mean*np.random.random()
+                if use_pos:
+                    embedding_matrix[i,dim:]=unique_pos_vector 
+    else:
+        embedding_matrix = None
+        embedding_dim = None
+    
+    one = reversed_dictionary[np.random.randint(2, vocabulary_size)]
+    two = reversed_dictionary[np.random.randint(2, vocabulary_size)]
+    three = reversed_dictionary[np.random.randint(2, vocabulary_size)]
+    
+    
     if brief_printout:
         print("First five train sentences in vectorized format : ", train_data[:5])
-        print("Vocabulary examples :   ", "cosmological - ", vocabulary['cosmological'], 
-              "conservatoire - ", vocabulary['conservatoire'], 
-              "bring - ", vocabulary['bring'])
+        print("Vocabulary examples : ")
+        print("1. ", one, vocabulary[one])
+        print("2. ", two, vocabulary[two])
+        print("3. ", three, vocabulary[three])
         print(" Size of vocabulary : ", vocabulary_size)
         train_data_lst=train_data.tolist()
         print(" ".join([reversed_dictionary[x] for x in train_data_lst[10] if x!=0]))
         print("")
     
     
-    return train_data, valid_data, test_data, vocabulary, reversed_dictionary, vocabulary_size, embedding_matrix, embedding_dim
+    return train_data, valid_data, test_data, vocabulary, reversed_dictionary, vocabulary_size, embedding_matrix, embedding_dim+pos_dim
+
+
+def load_sequential_data(data, pos_dict,
+              use_glove=True, 
+              embedding_dim=50,
+              use_pos=False,
+              train_split = 0.9,
+              valid_split = 0.1,
+              shuffle_df = True,
+              input_col_name='context_lemma_pos',
+              output_test_col_name='question_answer',
+              vocab_col_names=['text'],
+              brief_printout=True):
+    """ Takes in dataframe of untokenized text, expecting one input and one
+    output column and transforms it into 3 arrays for training, validation 
+    and testing data, each of dimensions:
+    (word, max_sentence_length, vocabulary_size)
+    ----------------------------------------------------------
+    data - Pandas dataframe
+    use_glove - bool, whether to use the pretrained Glove word embeddings
+    downloaded from https://nlp.stanford.edu/projects/glove/
+    embedding_dim - int, what is the dimension of the pretrained weights
+    train_split - float<1, fraction of data to use as train
+    valid_split - float<1, fraction of data to use for validation; test
+    split is 1 - other splits summed.
+    shuffle_df - whether to reorder the dataframe index
+    input_col_name - str, name of dataframe column to retrieve 
+    input text from
+    output_col_name - str, name of dataframe column to retrieve 
+    output text from
+    brief_printout - bool, whether to provide a brief printout of the 
+    results or not. 
+    pos_dict - dict, k:v pairs of POS tags (e.g. JJ, $, VBP) and a stored random float
+    ----------------------------------------------------------
+    RETURNS:
+    train_data, valid_data, test_data, - np.arrays
+    vocabulary, reversed_dictionary, - dict
+    vocabulary_size, int
+    embedding_matrix, np.array
+    embedding_dim, tuple(int)
+    """
+    
+    data.reset_index(inplace=True, drop=True)
+    
+    if shuffle_df:
+        data = data.sample(frac=1).reset_index(drop=True)
+    
+    train_df = data.iloc[:round(train_split*len(data))]
+    valid_df = data.iloc[round(train_split*len(data)):]
+#     test_df = data.iloc[round((train_split+valid_split)*len(data)):]
+    
+    input_max_len = data[input_col_name].apply(lambda x: len(x.split(' '))).max()
+#     output_max_len = data[output_col_name].apply(lambda x: len(x.split(' '))).max()
+
+    # build the complete vocabulary, then convert text data to dict of integer-word pairs
+    vocabulary = get_total_vocab(data, columns=vocab_col_names)
+    train_data = file_to_word_ids(vocabulary, train_df, input_col=input_col_name, output_col = None, 
+                                      max_input=input_max_len)
+    valid_data = file_to_word_ids(vocabulary, valid_df, input_col=input_col_name, output_col = None, 
+                                      max_input=input_max_len)
+#     test_data = file_to_word_ids(vocabulary, test_df, input_col=input_col_name, output_col = None, 
+#                                       max_input=input_max_len)
+    vocabulary_size = len(vocabulary)
+    reversed_dictionary = dict(zip(vocabulary.values(), vocabulary.keys()))
+    
+    if use_glove:
+        if use_pos:
+            pos_dim = 1
+           
+        else:
+            pos_dim = 0
+        dim=embedding_dim
+        if dim not in [50, 100, 200, 300]:
+            raise Exception('Specified embedding dimension ({}) not available. \n Current GloVe embeddings are [50, 100, 200, 300].'.format(dim))
+        embeddings_index = {}
+        f = open(os.path.join('glove.6B/glove.6B.{}d.txt'.format(dim)))
+        coefs_sum=np.zeros((dim,))
+        coefs_count = 0
+        # here we extract and build a dict containing all the words from the GloVe file and stor them under embeddings_index
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype='float32')
+            embeddings_index[word] = coefs
+            coefs_sum += coefs
+            coefs_count+=1
+        f.close()
+        coefs_mean = coefs_sum/coefs_count
+        
+        # the emb_matrix will be where we actually store our vectors; if using pos
+        # then we split the matrix: for each of the unique word&pos combinations
+        # we take let the first "dim" nr elements be taken up the embedding vector
+        # 
+        embedding_matrix = np.zeros((len(vocabulary), dim+pos_dim))
+        for word, i in vocabulary.items():
+            if use_pos:
+                word, pos = split_word_pos(word)
+                unique_pos_vector = vectorize_pos(pos, pos_dict)
+            embedding_vector = embeddings_index.get(word)
+            if embedding_vector is not None:
+                embedding_matrix[i,:dim] = embedding_vector
+                if use_pos:    
+                    embedding_matrix[i,dim:]=unique_pos_vector
+            else:
+                embedding_matrix[i,:dim] = coefs_mean*np.random.random()
+                if use_pos:
+                    embedding_matrix[i,dim:]=unique_pos_vector 
+    else:
+        embedding_matrix = None
+        embedding_dim = None
+    
+    one = reversed_dictionary[np.random.randint(2, vocabulary_size)]
+    two = reversed_dictionary[np.random.randint(2, vocabulary_size)]
+    three = reversed_dictionary[np.random.randint(2, vocabulary_size)]
+    
+    
+    if brief_printout:
+        print("First five words  in vectorized format : ", train_data[:5])
+        print("Vocabulary examples : ")
+        print("1. ", one, vocabulary[one])
+        print("2. ", two, vocabulary[two])
+        print("3. ", three, vocabulary[three])
+        print(" Size of vocabulary : ", vocabulary_size)
+#         train_data_lst=train_data.tolist()
+        print(" ".join([reversed_dictionary[x] for x in train_data[0:30] if x!=0]))
+        print("")
+    
+    
+    return train_data, valid_data, vocabulary, reversed_dictionary, vocabulary_size, embedding_matrix, embedding_dim+pos_dim
 
 
 
@@ -572,7 +755,7 @@ class KerasBatchGenerator(object):
     #     
     #     skip_steps = how far to move the window after the prediction is made
 
-    def generate(self):
+    def generate(self, one_sequence=False):
         """Object that takes in numpy array data, number of 'steps' to take 
         along sequence of data for each iteration; batch-size, 
         ----------------------------------------------------------
@@ -590,16 +773,54 @@ class KerasBatchGenerator(object):
         """
         x = np.zeros((self.batch_size, self.num_steps)) # input nn nodes, same dimensions as batchsize x nr of words in 1 window
         y = np.zeros((self.batch_size, self.num_steps, self.vocabulary_size)) # output nodes
-        while True:
-            for i in range(self.batch_size):
-                if self.current_idx + self.num_steps >= len(self.data): # once the ticker goes over the length of data, reset it
-                    self.current_idx = 0
-                x[i,:] = self.data[self.current_idx][:-self.answer_length]
-                temp_y = self.data[self.current_idx][self.answer_length:]
-                # converts all the output y into a 1-hot representation
-                y[i,:, :] = to_categorical(temp_y, num_classes=self.vocabulary_size)
-                self.current_idx+=1
+        if one_sequence:
+            while True:
+                for i in range(self.batch_size):
+                    if self.current_idx + self.num_steps >= len(self.data):
+                        # reset the index back to the start of the data set
+                        self.current_idx = 0
+                    x[i, :] = self.data[self.current_idx:self.current_idx + self.num_steps]
+                    temp_y = self.data[self.current_idx + 1:self.current_idx + self.num_steps + 1]
+                    # convert all of temp_y into a one hot representation
+                    y[i, :, :] = to_categorical(temp_y, num_classes=self.vocabulary_size)
+                    self.current_idx += self.skip_step
             
+                yield x,y
+        else:
+            while True:
+                for i in range(self.batch_size):
+                    if self.current_idx + self.num_steps >= len(self.data): # once the ticker goes over the length of data, reset it
+                        self.current_idx = 0
+                    x[i,:] = self.data[self.current_idx][:-self.answer_length]
+                    temp_y = self.data[self.current_idx][self.answer_length:]
+                    # converts all the output y into a 1-hot representation
+                    y[i,:, :] = to_categorical(temp_y, num_classes=self.vocabulary_size)
+                    self.current_idx+=1
+
+
+                yield x, y
             
-            yield x, y
+
             
+def concat_tuple(lst):
+    result=''
+    word_pos=''
+    for x in lst:
+#         for y in x:
+#             word_pos+=str(y)+'_'
+        word_pos = str(x[0])+'_'+str(x[1])
+        word_pos = word_pos.replace('\n', '')
+        word_pos = (word_pos.encode('ascii', 'ignore')).decode("utf-8")
+        
+        result+= ' ' + word_pos
+    result = result[1:]
+    
+    return result
+            
+def concat_word_pos(df, columns= ['context', 'answers']):
+    ndf = df.copy()
+    
+    for col in columns:
+        ndf[col] = ndf[col].apply(lambda tup: concat_tuple(tup))
+    
+    return ndf
